@@ -9,23 +9,28 @@ use RegexIterator;
 
 class Manager
 {
-	/** @const Regex to match CSS and JavaScript files */
-	const DEFAULT_REGEX = '/.\.(css|js)$/i';
-
-	/** @const Regex to match CSS files */
-	const CSS_REGEX = '/.\.css$/i';
-
-	/** @const Regex to match JavaScript files */
-	const JS_REGEX = '/.\.js$/i';
+	/**
+	 * Regex to match against a filename/url to determine if it is an asset.
+	 * @var string
+	 */
+	protected $asset_regex = '/.\.(css|js)$/i';
 
 	/**
-	 * Enable assets pipeline (concatenation and minification).
-	 * @var bool
+	 * Regex to match against a filename/url to determine if it is a CSS asset.
+	 * @var string
 	 */
-	protected $pipeline = false;
+
+	protected $css_regex = '/.\.css$/i';
+
+	/**
+	 * Regex to match against a filename/url to determine if it is a JavaScript asset.
+	 * @var string
+	 */
+	protected $js_regex = '/.\.js$/i';
 
 	/**
 	 * Absolute path to the public directory of your App (WEBROOT).
+	 * Required if you enable the pipeline.
 	 * No trailing slash!.
 	 * @var string
 	 */
@@ -33,7 +38,7 @@ class Manager
 
 	/**
 	 * Directory for local CSS assets.
-	 * Relative to your public directory.
+	 * Relative to your public directory ('public_dir').
 	 * No trailing slash!.
 	 * @var string
 	 */
@@ -48,12 +53,36 @@ class Manager
 	protected $js_dir = 'js';
 
 	/**
+	 * Directory for local package assets.
+	 * Relative to your public directory ('public_dir').
+	 * No trailing slash!.
+	 * @var string
+	 */
+	protected $packages_dir = 'packages';
+
+	/**
+	 * Enable assets pipeline (concatenation and minification).
+	 * If you set an integer value greather than 1 it will be used as pipeline timestamp that will be added to the URL.
+	 * @var bool|integer
+	 */
+	protected $pipeline = false;
+
+	/**
 	 * Directory for storing pipelined assets.
 	 * Relative to your assets directories ('css_dir' and 'js_dir').
 	 * No trailing slash!.
 	 * @var string
 	 */
 	protected $pipeline_dir = 'min';
+
+	/**
+	 * Enable pipelined assets compression with Gzip. Do not enable unless you know what you are doing!.
+	 * Useful only if your webserver supports Gzip HTTP_ACCEPT_ENCODING.
+	 * Set to true to use the default compression level.
+	 * Set an integer between 0 (no compression) and 9 (maximum compression) to choose compression level.
+	 * @var bool|integer
+	 */
+	protected $pipeline_gzip = false;
 
 	/**
 	 * Closure used by the pipeline to fetch assets.
@@ -71,6 +100,8 @@ class Manager
 	/**
 	 * Closure used to wrap output when serve assets.
 	 *
+	 * The closure will recieve as the only parameter a string with the URL of the asset and
+	 * it should return a way to get the full URL as a string
 	 * @var Closure
 	 */
 	protected $warp_command;
@@ -117,27 +148,25 @@ class Manager
 	 * Also, an extra option 'autoload' may be passed containing an array of
 	 * assets and/or collections that will be automatically added on startup.
 	 *
-	 * @param  array $options Configurable options.
+	 * @param  array   $config Configurable options.
 	 * @return Manager
 	 * @throws Exception
 	 */
 	public function config(array $config)
 	{
-		// Set pipeline mode
-		if(isset($config['pipeline']))
-			$this->pipeline = $config['pipeline'];
+		// Set regex options
+		foreach(array('asset_regex', 'css_regex', 'js_regex') as $option)
+			if(isset($config[$option]) and (@preg_match($config[$option], null) !== false))
+				$this->$option = $config[$option];
 
-		// Set public dir
-		if(isset($config['public_dir']))
-			$this->public_dir = $config['public_dir'];
+		// Set common options
+		foreach(array('public_dir', 'css_dir', 'js_dir', 'packages_dir', 'pipeline',  'pipeline_dir', 'pipeline_gzip') as $option)
+			if(isset($config[$option]))
+				$this->$option = $config[$option];
 
 		// Pipeline requires public dir
 		if($this->pipeline and ! is_dir($this->public_dir))
 			throw new Exception('stolz/assets: Public dir not found');
-
-		// Set custom pipeline directory
-		if(isset($config['pipeline_dir']))
-			$this->pipeline_dir = $config['pipeline_dir'];
 
 		// Set custom pipeline fetch command
 		if(isset($config['fetch_command']) and ($config['fetch_command'] instanceof Closure))
@@ -147,26 +176,14 @@ class Manager
 		if(isset($config['wrap_command']) and ($config['wrap_command'] instanceof Closure))
 			$this->wrap_command = $config['wrap_command'];
 
-		// Set custom CSS directory
-		if(isset($config['css_dir']))
-			$this->css_dir = $config['css_dir'];
-
-		// Set custom JavaScript directory
-		if(isset($config['js_dir']))
-			$this->js_dir = $config['js_dir'];
-
 		// Set collections
 		if(isset($config['collections']) and is_array($config['collections']))
 			$this->collections = $config['collections'];
 
 		// Autoload assets
 		if(isset($config['autoload']) and is_array($config['autoload']))
-		{
 			foreach($config['autoload'] as $asset)
-			{
 				$this->add($asset);
-			}
-		}
 
 		return $this;
 	}
@@ -188,24 +205,18 @@ class Manager
 			foreach($asset as $a)
 				$this->add($a);
 		}
+
 		// Collection
 		elseif(isset($this->collections[$asset]))
-		{
 			$this->add($this->collections[$asset]);
-		}
-		else
-		{
-			// JavaScript or CSS
-			$info = pathinfo($asset);
-			if(isset($info['extension']))
-			{
-				$ext = strtolower($info['extension']);
-				if($ext === 'css')
-					$this->addCss($asset);
-				elseif($ext === 'js')
-					$this->addJs($asset);
-			}
-		}
+
+		// JavaScript asset
+		elseif(preg_match($this->js_regex, $asset))
+			$this->addJs($asset);
+
+		// CSS asset
+		elseif(preg_match($this->css_regex, $asset))
+			$this->addCss($asset);
 
 		return $this;
 	}
@@ -267,41 +278,78 @@ class Manager
 	}
 
 	/**
-	 * Build the CSS link tags.
+	 * Build the CSS `<link>` tags.
 	 *
+	 * Accepts an array of $attributes for the HTML tag.
+	 * You can take control of the tag rendering by
+	 * providing a closure that will receive an array of assets.
+	 *
+	 * @param  array|Closure $attributes
 	 * @return string
 	 */
-	public function css()
+	public function css($attributes = null)
 	{
 		if( ! $this->css)
-			return null;
+			return '';
 
-		if($this->pipeline)
-			return '<link type="text/css" rel="stylesheet" href="'.$this->wrap($this->cssPipeline()).'" />'."\n";
+		$assets = ($this->pipeline) ? array($this->cssPipeline()) : $this->css;
 
+		if($attributes instanceof Closure)
+			return $attributes($assets);
+
+		// Build attributes
+		$attributes = (array) $attributes;
+		unset($attributes['href']);
+
+		if( ! array_key_exists('type', $attributes))
+			$attributes['type'] = 'text/css';
+
+		if( ! array_key_exists('rel', $attributes))
+			$attributes['rel'] = 'stylesheet';
+
+		$attributes = $this->buildTagAttributes($attributes);
+
+		// Build tags
 		$output = '';
-		foreach($this->css as $file)
-			$output .= '<link type="text/css" rel="stylesheet" href="'.$this->wrap($file).'" />'."\n";
+		foreach($assets as $asset)
+			$output .= '<link href="' . $this->wrap($asset) . '"' . $attributes . " />\n";
 
 		return $output;
 	}
 
 	/**
-	 * Build the JavaScript script tags.
+	 * Build the JavaScript `<script>` tags.
 	 *
+	 * Accepts an array of $attributes for the HTML tag.
+	 * You can take control of the tag rendering by
+	 * providing a closure that will receive an array of assets.
+	 *
+	 * @param  array|Closure $attributes
 	 * @return string
 	 */
-	public function js()
+	public function js($attributes = null)
 	{
 		if( ! $this->js)
-			return null;
+			return '';
 
-		if($this->pipeline)
-			return '<script type="text/javascript" src="'.$this->wrap($this->jsPipeline()).'"></script>'."\n";
+		$assets = ($this->pipeline) ? array($this->jsPipeline()) : $this->js;
 
+		if($attributes instanceof Closure)
+			return $attributes($assets);
+
+		// Build attributes
+		$attributes = (array) $attributes;
+		unset($attributes['src']);
+
+		if( ! array_key_exists('type', $attributes))
+			$attributes['type'] = 'text/javascript';
+
+		$attributes = $this->buildTagAttributes($attributes);
+
+		// Build tags
 		$output = '';
-		foreach($this->js as $file)
-			$output .= '<script type="text/javascript" src="'.$this->wrap($file).'"></script>'."\n";
+		foreach($assets as $asset)
+			$output .= '<script src="' . $this->wrap($asset) . '"' . $attributes . "></script>\n";
 
 		return $output;
 	}
@@ -313,7 +361,7 @@ class Manager
 	 * @param  array   $assets
 	 * @return Manager
 	 */
-	public function registerCollection($collectionName, Array $assets)
+	public function registerCollection($collectionName, array $assets)
 	{
 		$this->collections[$collectionName] = $assets;
 
@@ -361,31 +409,10 @@ class Manager
 	 */
 	protected function cssPipeline()
 	{
-		$timestamp = (intval($this->pipeline) > 1) ? '?' . $this->pipeline : null;
-		$file = md5($timestamp . implode($this->css)).'.css';
-		$relative_path = "{$this->css_dir}/{$this->pipeline_dir}/$file";
-		$absolute_path = $this->public_dir . DIRECTORY_SEPARATOR . $this->css_dir . DIRECTORY_SEPARATOR . $this->pipeline_dir . DIRECTORY_SEPARATOR . $file;
-
-		// If pipeline exist return it
-		if(file_exists($absolute_path))
-			return $relative_path . $timestamp;
-
-		// Create destination directory
-		$directory = $this->public_dir . DIRECTORY_SEPARATOR . $this->css_dir . DIRECTORY_SEPARATOR . $this->pipeline_dir;
-		if( ! is_dir($directory))
-			mkdir($directory, 0777, true);
-
-		// Concatenate files
-		$buffer = $this->gatherLinks($this->css);
-
-		// Minifiy
-		$min = new \CSSmin();
-		$min = $min->run($buffer);
-
-		// Write file
-		file_put_contents($absolute_path, $min);
-
-		return $relative_path . $timestamp;
+		return $this->pipeline($this->css, '.css', $this->css_dir, function ($buffer) {
+			$min = new \CSSmin();
+			return $min->run($buffer);
+		});
 	}
 
 	/**
@@ -395,28 +422,51 @@ class Manager
 	 */
 	protected function jsPipeline()
 	{
+		return $this->pipeline($this->js, '.js', $this->js_dir, function ($buffer) {
+			return \JSMin::minify($buffer);
+		});
+	}
+
+	/**
+	 * Minifiy and concatenate files.
+	 *
+	 * @param array   $assets
+	 * @param string  $extension
+	 * @param string  $subdirectory
+	 * @param Closure $minifier
+	 *
+	 * @return string
+	 */
+	protected function pipeline(array $assets, $extension, $subdirectory, Closure $minifier)
+	{
 		$timestamp = (intval($this->pipeline) > 1) ? '?' . $this->pipeline : null;
-		$file = md5($timestamp . implode($this->js)).'.js';
-		$relative_path = "{$this->js_dir}/{$this->pipeline_dir}/$file";
-		$absolute_path = $this->public_dir . DIRECTORY_SEPARATOR . $this->js_dir . DIRECTORY_SEPARATOR . $this->pipeline_dir . DIRECTORY_SEPARATOR . $file;
+		$file = md5($timestamp . implode($assets)) . $extension;
+		$relative_path = "$subdirectory/{$this->pipeline_dir}/$file";
+		$absolute_path = $this->public_dir . DIRECTORY_SEPARATOR . $subdirectory . DIRECTORY_SEPARATOR . $this->pipeline_dir . DIRECTORY_SEPARATOR . $file;
 
 		// If pipeline exist return it
 		if(file_exists($absolute_path))
 			return $relative_path . $timestamp;
 
 		// Create destination directory
-		$directory = $this->public_dir . DIRECTORY_SEPARATOR . $this->js_dir . DIRECTORY_SEPARATOR . $this->pipeline_dir;
-		if( ! is_dir($directory))
+		if( ! is_dir($directory = dirname($absolute_path)))
 			mkdir($directory, 0777, true);
 
 		// Concatenate files
-		$buffer = $this->gatherLinks($this->js);
+		$buffer = $this->gatherLinks($assets);
 
 		// Minifiy
-		$min = \JSMin::minify($buffer);
+		$min = $minifier->__invoke($buffer);
 
-		// Write file
+		// Write minified file
 		file_put_contents($absolute_path, $min);
+
+		// Write gziped file
+		if(function_exists('gzencode') and $this->pipeline_gzip !== false)
+		{
+			$level = ($this->pipeline_gzip === true) ? -1 : intval($this->pipeline_gzip);
+			file_put_contents("$absolute_path.gz", gzencode($min, $level));
+		}
 
 		return $relative_path . $timestamp;
 	}
@@ -434,10 +484,12 @@ class Manager
 		{
 			if($this->isRemoteLink($link))
 			{
+				// Add current protocol to agnostic links
 				if('//' === substr($link, 0, 2))
-					(isset($_SERVER["HTTPS"]) && !empty($_SERVER["HTTPS"]) && $_SERVER["HTTPS"] !== 'off') ?
-                        			$link = 'https:' . $link :
-                        			$link = 'http:' . $link;
+				{
+					$protocol = (isset($_SERVER['HTTPS']) and ! empty($_SERVER['HTTPS']) and $_SERVER['HTTPS'] !== 'off') ? 'https:' : 'http:';
+					$link = $protocol . $link;
+				}
 			}
 			else
 			{
@@ -466,7 +518,31 @@ class Manager
 		if($package === false)
 			return $dir . '/' . $asset;
 
-		return '/packages/' . $package[0] . '/' .$package[1] . '/' . ltrim($dir, '/') . '/' .$package[2];
+		return $this->packages_dir . '/' . $package[0] . '/' .$package[1] . '/' . ltrim($dir, '/') . '/' . $package[2];
+	}
+
+	/**
+	 * Build an HTML attribute string from an array.
+	 *
+	 * @param  array  $attributes
+	 * @return string
+	 */
+	public function buildTagAttributes(array $attributes)
+	{
+		$html = array();
+
+		foreach ($attributes as $key => $value)
+		{
+			if (is_null($value))
+				continue;
+
+			if (is_numeric($key))
+				$key = $value;
+
+			$html[] = $key . '="' . htmlentities($value, ENT_QUOTES, 'UTF-8', false) . '"';
+		}
+
+		return (count($html) > 0) ? ' ' . implode(' ', $html) : '';
 	}
 
 	/**
@@ -524,46 +600,34 @@ class Manager
 	 * @return Manager
 	 * @throws Exception
 	 */
-	public function addDir($directory, $pattern = self::DEFAULT_REGEX)
+	public function addDir($directory, $pattern = null)
 	{
 		// Check if public_dir exists
 		if( ! is_dir($this->public_dir))
 			throw new Exception('stolz/assets: Public dir not found');
 
-		// Get files
+		// By default match all assets
+		if(is_null($pattern))
+			$pattern = $this->asset_regex;
+
+		// Get assets files
 		$files = $this->rglob($this->public_dir . DIRECTORY_SEPARATOR . $directory, $pattern, $this->public_dir);
 
 		// No luck? Nothing to do
 		if( ! $files)
 			return $this;
 
-		// Add CSS files
-		if($pattern === self::CSS_REGEX)
-		{
-			$this->css = array_unique(array_merge($this->css, $files));
-			return $this;
-		}
-
-		// Add JavaScript files
-		if($pattern === self::JS_REGEX)
-		{
+		// Avoid polling if the pattern is our old friend JavaScript
+		if($pattern === $this->js_regex)
 			$this->js = array_unique(array_merge($this->js, $files));
-			return $this;
-		}
 
-		// Unknown pattern. We must poll to know the extension :(
-		foreach($files as $asset)
-		{
-			$info = pathinfo($asset);
-			if(isset($info['extension']))
-			{
-				$ext = strtolower($info['extension']);
-				if($ext === 'css' and ! in_array($asset, $this->css))
-					$this->css[] = $asset;
-				elseif($ext === 'js' and ! in_array($asset, $this->js))
-					$this->js[] = $asset;
-			}
-		}
+		// Avoid polling if the pattern is our old friend CSS
+		elseif($pattern === $this->css_regex)
+			$this->css = array_unique(array_merge($this->css, $files));
+
+		// Unknown pattern. We must poll to know the asset type :(
+		else foreach($files as $asset)
+			$this->add($asset);
 
 		return $this;
 	}
@@ -576,18 +640,18 @@ class Manager
 	 */
 	public function addDirCss($directory)
 	{
-		return $this->addDir($directory, self::CSS_REGEX);
+		return $this->addDir($directory, $this->css_regex);
 	}
 
 	/**
-	 * Add all JavaScript assets within $directory.
+	 * Add all JavaScript assets within $directory (relative to public dir).
 	 *
 	 * @param  string $directory Relative to $this->public_dir
 	 * @return Manager
 	 */
 	public function addDirJs($directory)
 	{
-		return $this->addDir($directory, self::JS_REGEX);
+		return $this->addDir($directory, $this->js_regex);
 	}
 
 	/**
@@ -611,7 +675,7 @@ class Manager
 	}
 
 	/**
-	 * Wrap link.
+	 * Wrap a link.
 	 * 
 	 * @param  string $link
 	 * @return string

@@ -11,51 +11,45 @@ Assets
 
 
 
-Constants
-----------
-
-
-### DEFAULT_REGEX
-
-```
-const DEFAULT_REGEX = '/.\.(css|js)$/i'
-```
-
-
-
-
-
-### CSS_REGEX
-
-```
-const CSS_REGEX = '/.\.css$/i'
-```
-
-
-
-
-
-### JS_REGEX
-
-```
-const JS_REGEX = '/.\.js$/i'
-```
-
-
-
 
 
 Properties
 ----------
 
 
-### $pipeline
+### $asset_regex
 
 ```
-protected boolean $pipeline = false
+protected string $asset_regex = '/.\.(css|js)$/i'
 ```
 
-Enable assets pipeline (concatenation and minification).
+Regex to match against a filename/url to determine if it is an asset.
+
+
+
+* Visibility: **protected**
+
+
+### $css_regex
+
+```
+protected string $css_regex = '/.\.css$/i'
+```
+
+Regex to match against a filename/url to determine if it is a CSS asset.
+
+
+
+* Visibility: **protected**
+
+
+### $js_regex
+
+```
+protected string $js_regex = '/.\.js$/i'
+```
+
+Regex to match against a filename/url to determine if it is a JavaScript asset.
 
 
 
@@ -70,6 +64,7 @@ protected string $public_dir
 
 Absolute path to the public directory of your App (WEBROOT).
 
+Required if you enable the pipeline.
 No trailing slash!.
 
 * Visibility: **protected**
@@ -83,7 +78,7 @@ protected string $css_dir = 'css'
 
 Directory for local CSS assets.
 
-Relative to your public directory.
+Relative to your public directory ('public_dir').
 No trailing slash!.
 
 * Visibility: **protected**
@@ -103,6 +98,33 @@ No trailing slash!.
 * Visibility: **protected**
 
 
+### $packages_dir
+
+```
+protected string $packages_dir = 'packages'
+```
+
+Directory for local package assets.
+
+Relative to your public directory ('public_dir').
+No trailing slash!.
+
+* Visibility: **protected**
+
+
+### $pipeline
+
+```
+protected boolean $pipeline = false
+```
+
+Enable assets pipeline (concatenation and minification).
+
+If you set an integer value greather than 1 it will be used as pipeline timestamp that will be added to the URL.
+
+* Visibility: **protected**
+
+
 ### $pipeline_dir
 
 ```
@@ -113,6 +135,21 @@ Directory for storing pipelined assets.
 
 Relative to your assets directories ('css_dir' and 'js_dir').
 No trailing slash!.
+
+* Visibility: **protected**
+
+
+### $pipeline_gzip
+
+```
+protected boolean $pipeline_gzip = false
+```
+
+Enable pipelined assets compression with Gzip. Do not enable unless you know what you are doing!.
+
+Useful only if your webserver supports Gzip HTTP_ACCEPT_ENCODING.
+Set to true to use the default compression level.
+Set an integer between 0 (no compression) and 9 (maximum compression) to choose compression level.
 
 * Visibility: **protected**
 
@@ -213,7 +250,7 @@ assets and/or collections that will be automatically added on startup.
 
 #### Arguments
 
-* $config **array**
+* $config **array** - &lt;p&gt;Configurable options.&lt;/p&gt;
 
 
 
@@ -277,28 +314,40 @@ You may add more than one asset passing an array as argument.
 ### css()
 
 ```
-string css()()
+string css()(array|\Closure $attributes)
 ```
 
-Build the CSS link tags.
+Build the CSS `<link>` tags.
 
-
+Accepts an array of $attributes for the HTML tag.
+You can take control of the tag rendering by
+providing a closure that will receive an array of assets.
 
 * Visibility: **public**
+
+#### Arguments
+
+* $attributes **array|Closure**
 
 
 
 ### js()
 
 ```
-string js()()
+string js()(array|\Closure $attributes)
 ```
 
-Build the JavaScript script tags.
+Build the JavaScript `<script>` tags.
 
-
+Accepts an array of $attributes for the HTML tag.
+You can take control of the tag rendering by
+providing a closure that will receive an array of assets.
 
 * Visibility: **public**
+
+#### Arguments
+
+* $attributes **array|Closure**
 
 
 
@@ -391,6 +440,27 @@ Minifiy and concatenate JavaScript files.
 
 
 
+### pipeline()
+
+```
+string pipeline()(array $assets, string $extension, string $subdirectory, \Closure $minifier)
+```
+
+Minifiy and concatenate files.
+
+
+
+* Visibility: **protected**
+
+#### Arguments
+
+* $assets **array**
+* $extension **string**
+* $subdirectory **string**
+* $minifier **Closure**
+
+
+
 ### gatherLinks()
 
 ```
@@ -425,6 +495,24 @@ Detects packages links.
 
 * $asset **string**
 * $dir **string**
+
+
+
+### buildTagAttributes()
+
+```
+string buildTagAttributes()(array $attributes)
+```
+
+Build an HTML attribute string from an array.
+
+
+
+* Visibility: **public**
+
+#### Arguments
+
+* $attributes **array**
 
 
 
@@ -535,7 +623,7 @@ Add all CSS assets within $directory (relative to public dir).
 Assets addDirJs()(string $directory)
 ```
 
-Add all JavaScript assets within $directory.
+Add all JavaScript assets within $directory (relative to public dir).
 
 
 
